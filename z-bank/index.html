@@ -7,9 +7,17 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <!-- SPLASH -->
+  <div class="splash" id="splash">
+    <div class="splash-inner">
+      <div class="splash-mark">Z</div>
+      <p class="splash-text">Рады видеть снова!</p>
+    </div>
+  </div>
+
   <div class="noise"></div>
 
-  <!-- ================= AUTH ================= -->
+  <!-- AUTH -->
   <div class="auth" id="authScreen">
     <div class="auth-card">
       <div class="brand">
@@ -56,7 +64,7 @@
     </div>
   </div>
 
-  <!-- ================= APP ================= -->
+  <!-- APP -->
   <div class="app" id="appScreen" hidden>
     <aside class="sidebar" id="sidebar">
       <div>
@@ -102,7 +110,6 @@
         </div>
       </header>
 
-      <!-- DASHBOARD -->
       <section class="page active" id="page-dashboard">
         <div class="hero-grid">
           <div class="balance-card">
@@ -136,7 +143,6 @@
         <div class="transactions" id="recentTransactions"></div>
       </section>
 
-      <!-- CARDS -->
       <section class="page" id="page-cards">
         <div class="section-head">
           <h2>Управление картами</h2>
@@ -146,7 +152,6 @@
         <div class="manage-grid" id="cardsGrid"></div>
       </section>
 
-      <!-- PAYMENTS -->
       <section class="page" id="page-payments">
         <div class="section-head"><h2>Платежи и переводы</h2></div>
         <div class="payment-grid">
@@ -158,26 +163,22 @@
         </div>
       </section>
 
-      <!-- DEPOSITS -->
       <section class="page" id="page-deposits">
         <div class="section-head"><h2>Вклады</h2><button class="primary-btn" id="openDepositBtn">Открыть вклад</button></div>
         <div class="deposits-grid" id="depositsGrid"></div>
       </section>
 
-      <!-- CRYPTO -->
       <section class="page" id="page-crypto">
         <div class="section-head"><h2>Криптовалюта</h2><span class="pill" id="cryptoPortfolio">Портфель: 0 ₽</span></div>
         <div class="crypto-grid" id="cryptoGrid"></div>
       </section>
 
-      <!-- TASKS -->
       <section class="page" id="page-tasks">
         <div class="section-head"><h2>Задания за бонусы</h2><span class="pill" id="tasksCounter">0 / 0</span></div>
         <p class="lead-small">Выполняйте задания и получайте по 50 ₽ на счёт. Начисления автоматические.</p>
         <div class="tasks-list" id="tasksList"></div>
       </section>
 
-      <!-- ANALYTICS -->
       <section class="page" id="page-analytics">
         <div class="section-head"><h2>Аналитика расходов</h2></div>
         <div class="analytics-card">
@@ -193,7 +194,6 @@
         </div>
       </section>
 
-      <!-- SETTINGS -->
       <section class="page" id="page-settings">
         <div class="section-head"><h2>Настройки</h2><button class="ghost-btn" id="logoutBtn">Выйти</button></div>
         <div class="settings-card">
@@ -205,7 +205,6 @@
     </main>
   </div>
 
-  <!-- MODAL -->
   <div class="modal" id="modal">
     <div class="modal-box">
       <button class="modal-close" data-close>×</button>
