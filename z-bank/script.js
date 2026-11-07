@@ -1,18 +1,16 @@
 /* ============================================================
-   Z-Bank Demo v3
-   ВАЖНО: это демо-приложение на клиенте. Не подключать к реальным
-   деньгам. Все данные хранятся в localStorage и подписаны.
+   Z-Bank Demo v4 (client-only). Не подключать к реальным деньгам.
    ============================================================ */
-
 (function () {
   'use strict';
 
-  /* ---------- КОНСТАНТЫ ---------- */
-  const STORAGE_KEY = 'zbank_v2_state';  // тот же ключ, старые данные будут отброшены
+  const STORAGE_KEY = 'zbank_v4_state';
   const WELCOME_BONUS = 500;
   const TASK_REWARD = 50;
-  const CARD_ISSUE_MS = 5 * 60 * 1000;
+  const HOURLY_BONUS = 500;
+  const HOURLY_INTERVAL = 3600 * 1000;
   const MONTHLY_LIMIT = 500000;
+  const MAX_CARDS = 2;
 
   const CATEGORY_LABELS = {
     transfer: 'Переводы',
@@ -24,14 +22,14 @@
   };
 
   const TASKS = [
-    { id: 'card',     title: 'Выпустить первую карту', desc: 'Готовую карту после 5 минут', check: s => s.cards.length > 0 },
-    { id: 'transfer', title: 'Совершить перевод',      desc: 'Любая сумма на любой номер',  check: s => s.transactions.some(t => t.category === 'transfer') },
-    { id: 'deposit',  title: 'Открыть вклад',          desc: 'С любой суммой и ставкой',    check: s => s.deposits.length > 0 },
-    { id: 'utilities',title: 'Оплатить ЖКХ',           desc: 'Коммунальные услуги',         check: s => s.transactions.some(t => t.category === 'utilities') },
-    { id: 'taxes',    title: 'Оплатить налоги',        desc: 'Штрафы и сборы',              check: s => s.transactions.some(t => t.category === 'taxes') },
-    { id: 'mobile',   title: 'Пополнить мобильный',    desc: 'Связь любого оператора',      check: s => s.transactions.some(t => t.category === 'mobile') },
-    { id: 'internet', title: 'Оплатить интернет',      desc: 'Провайдер',                   check: s => s.transactions.some(t => t.category === 'internet') },
-    { id: 'crypto',   title: 'Купить криптовалюту',    desc: 'BTC, ETH, SOL или TON',       check: s => Object.keys(s.crypto).length > 0 }
+    { id: 'card',     title: 'Выпустить первую карту', desc: 'Мгновенный выпуск в разделе «Мои карты»', check: s => s.cards.length > 0 },
+    { id: 'transfer', title: 'Совершить перевод',      desc: 'Любая сумма на любой номер',              check: s => s.transactions.some(t => t.category === 'transfer') },
+    { id: 'deposit',  title: 'Открыть вклад',          desc: 'С любой суммой и ставкой',                check: s => s.deposits.length > 0 },
+    { id: 'utilities',title: 'Оплатить ЖКХ',           desc: 'Коммунальные услуги',                     check: s => s.transactions.some(t => t.category === 'utilities') },
+    { id: 'taxes',    title: 'Оплатить налоги',        desc: 'Штрафы и сборы',                          check: s => s.transactions.some(t => t.category === 'taxes') },
+    { id: 'mobile',   title: 'Пополнить мобильный',    desc: 'Связь любого оператора',                  check: s => s.transactions.some(t => t.category === 'mobile') },
+    { id: 'internet', title: 'Оплатить интернет',      desc: 'Провайдер',                               check: s => s.transactions.some(t => t.category === 'internet') },
+    { id: 'crypto',   title: 'Купить криптовалюту',    desc: 'BTC, ETH, SOL или TON',                   check: s => Object.keys(s.crypto).length > 0 }
   ];
 
   const CRYPTO_META = {
@@ -48,11 +46,9 @@
     TON: { price: 620,     dayOpen: 620 }
   };
 
-  /* ---------- ПОДПИСЬ СОСТОЯНИЯ ----------
-     Секрет обфусцирован. На клиенте это не крипто-защита, но поднять
-     планку для "state.balance = 999999" — работает отлично. */
+  // ---------- Подпись состояния ----------
   const _k = [0x7a, 0x5f, 0x62, 0x61, 0x6e, 0x6b, 0x5f, 0x32, 0x30, 0x32, 0x36, 0x5f, 0x69, 0x6e, 0x74, 0x65, 0x72, 0x6e, 0x61, 0x6c];
-  const SECRET = _k.map(c => String.fromCharCode(c)).join('') + '_v3xK';
+  const SECRET = _k.map(c => String.fromCharCode(c)).join('') + '_v4xK';
 
   function _hash(str) {
     let h1 = 0x811c9dc5;
@@ -74,21 +70,18 @@
   function signState(s) {
     const cryptoEntries = Object.keys(s.crypto || {}).sort()
       .map(k => [k, s.crypto[k]?.amount || 0, s.crypto[k]?.avgPrice || 0]);
-
     const content = JSON.stringify([
       s.user ? [s.user.firstName, s.user.lastName, s.user.phone, s.user.password, s.user.createdAt] : null,
       (s.transactions || []).map(t => [t.id, t.direction, t.amount, t.category, t.date]),
       (s.cards || []).map(c => [c.id, c.type, c.last4, c.limit, c.spent, c.frozen ? 1 : 0]),
-      (s.pendingCards || []).map(p => [p.id, p.type, p.readyAt]),
       (s.deposits || []).map(d => [d.id, d.amount, d.termMonths, d.rate, d.openedAt]),
       cryptoEntries,
-      s.claimedTasks || []
+      s.claimedTasks || [],
+      s.lastBonusAt || 0
     ]);
-
     return _hash(SECRET + '::' + content);
   }
 
-  /* ---------- STATE ---------- */
   let state = loadState();
 
   function defaultState() {
@@ -97,10 +90,10 @@
       balance: 0,
       transactions: [],
       cards: [],
-      pendingCards: [],
       deposits: [],
       crypto: {},
       claimedTasks: [],
+      lastBonusAt: 0,
       settings: { hideBalance: false, notifications: true }
     };
   }
@@ -119,19 +112,13 @@
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return defaultState();
-
       const parsed = JSON.parse(raw);
-
-      // Требуется подпись. Нет подписи / не сходится → считаем данными
-      // из старой (незащищённой) версии или подделкой. Сбрасываем.
       if (!parsed || typeof parsed !== 'object' || !parsed._sig || parsed._sig !== signState(parsed)) {
-        console.warn('[Z-Bank] Обнаружены неподписанные/изменённые данные. Сброс.');
+        console.warn('[Z-Bank] Данные повреждены или подделаны. Сброс.');
         localStorage.removeItem(STORAGE_KEY);
         return defaultState();
       }
-
       const merged = { ...defaultState(), ...parsed };
-      // Баланс всегда пересчитывается из транзакций — хранимому не доверяем
       merged.balance = deriveBalance(merged.transactions);
       delete merged._sig;
       return merged;
@@ -141,15 +128,12 @@
   }
 
   function save() {
-    // Пересчитываем баланс перед сохранением — самовосстановление
     state.balance = deriveBalance(state.transactions);
     state._sig = signState(state);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch {}
   }
 
-  /* ---------- UTILS ---------- */
+  // ---------- Utils ----------
   const $ = sel => document.querySelector(sel);
   const $$ = sel => document.querySelectorAll(sel);
 
@@ -180,7 +164,7 @@
     return r;
   };
 
-  /* ---------- ВАЛИДАЦИЯ ---------- */
+  // ---------- Валидация ----------
   const NAME_RE = /^[А-ЯЁ][а-яё]{1,29}$/;
   const PHONE_RE = /^\+7 \(\d{3}\) \d{3}-\d{2}-\d{2}$/;
   const PASSWORD_RE = /^(?=.*[A-Za-zА-Яа-яЁё])(?=.*\d).{8,}$/;
@@ -193,7 +177,7 @@
     return null;
   }
 
-  /* ---------- AUTH ---------- */
+  // ---------- Auth ----------
   function showAuth() {
     $('#authScreen').hidden = false;
     $('#appScreen').hidden = true;
@@ -202,15 +186,15 @@
   function showApp() {
     $('#authScreen').hidden = true;
     $('#appScreen').hidden = false;
-    renderAll();
-    startTickers();
     if (state.user) {
       const ini = initials(state.user.firstName, state.user.lastName);
       $('#userAvatar').textContent = ini;
       $('#userAvatarTop').textContent = ini;
-      $('#userName').textContent = `${state.user.firstName} ${state.user.lastName}`;
-      $('#cardHolder').textContent = `${state.user.firstName[0]}. ${state.user.lastName.toUpperCase()}`;
+      $('#userName').textContent = state.user.firstName + ' ' + state.user.lastName;
+      $('#cardHolder').textContent = state.user.firstName[0] + '. ' + state.user.lastName.toUpperCase();
     }
+    renderAll();
+    startTickers();
   }
 
   $$('.auth-tab').forEach(tab => {
@@ -233,11 +217,9 @@
     err.textContent = '';
     const phone = $('#loginPhone').value.trim();
     const password = $('#loginPassword').value;
-
     if (!state.user) { err.textContent = 'Аккаунта нет. Зарегистрируйтесь.'; return; }
     if (state.user.phone !== phone) { err.textContent = 'Неверный номер телефона.'; return; }
     if (state.user.password !== password) { err.textContent = 'Неверный пароль.'; return; }
-
     showApp();
     showToast('Добро пожаловать, ' + state.user.firstName + '!', 'success');
   });
@@ -246,26 +228,19 @@
     e.preventDefault();
     const err = $('#registerError');
     err.textContent = '';
-
     const data = {
       firstName: $('#regFirstName').value.trim(),
       lastName: $('#regLastName').value.trim(),
       phone: $('#regPhone').value.trim(),
       password: $('#regPassword').value
     };
-
     const validationError = validateRegistration(data);
     if (validationError) { err.textContent = validationError; return; }
-
     if (state.user && state.user.phone === data.phone) {
       err.textContent = 'Аккаунт с этим номером уже существует.'; return;
     }
-
     state.user = { ...data, createdAt: Date.now() };
-    addTransaction({
-      direction: 'in', amount: WELCOME_BONUS, category: 'welcome',
-      description: 'Приветственный бонус'
-    });
+    addTransaction({ direction: 'in', amount: WELCOME_BONUS, category: 'welcome', description: 'Приветственный бонус' });
     save();
     showApp();
     showToast('Аккаунт создан. Начислено ' + money(WELCOME_BONUS), 'success');
@@ -281,9 +256,8 @@
     }
   });
 
-  /* ---------- NAV ---------- */
+  // ---------- Nav ----------
   let currentPage = 'dashboard';
-
   function showPage(id) {
     const page = document.getElementById('page-' + id);
     if (!page) return;
@@ -294,14 +268,12 @@
     $('#sidebar').classList.remove('open');
     currentPage = id;
     window.scrollTo({ top: 0, behavior: 'smooth' });
-
     if (id === 'crypto') renderCrypto();
     if (id === 'analytics') renderAnalytics();
     if (id === 'tasks') renderTasks();
     if (id === 'deposits') renderDeposits();
     if (id === 'cards') renderCards();
   }
-
   $$('.nav-item').forEach(n => n.addEventListener('click', () => showPage(n.dataset.page)));
   $$('[data-page-target]').forEach(el => el.addEventListener('click', e => {
     e.preventDefault();
@@ -309,7 +281,7 @@
   }));
   $('#menuBtn').addEventListener('click', () => $('#sidebar').classList.toggle('open'));
 
-  /* ---------- ТРАНЗАКЦИИ ---------- */
+  // ---------- Транзакции ----------
   function addTransaction({ direction, amount, category, description }) {
     if (!isFinite(amount) || amount <= 0) return;
     state.transactions.unshift({
@@ -325,13 +297,10 @@
 
   function debit(amount, category, description) {
     if (!isFinite(amount) || amount <= 0) throw new Error('Сумма должна быть больше нуля');
-    // Всегда проверяем по пересчитанному балансу, не по мутируемому
     const realBalance = deriveBalance(state.transactions);
     if (amount > realBalance) throw new Error('Недостаточно средств');
-
     addTransaction({ direction: 'out', amount, category, description });
     state.balance = deriveBalance(state.transactions);
-
     if (state.cards.length) {
       state.cards[0].spent = (state.cards[0].spent || 0) + amount;
     }
@@ -347,12 +316,13 @@
     renderAll();
   }
 
-  /* ---------- RENDER ---------- */
+  // ---------- RENDER ----------
   function renderAll() {
     renderBalance();
     renderRecent();
     renderCards();
     renderProgress();
+    renderBonus();
     if (currentPage === 'analytics') renderAnalytics();
     if (currentPage === 'tasks') renderTasks();
     if (currentPage === 'deposits') renderDeposits();
@@ -363,7 +333,6 @@
     const hidden = state.settings.hideBalance;
     $('#balanceValue').textContent = hidden ? '••••••' : money(state.balance);
     $('#toggleBalance').textContent = hidden ? 'Показать' : 'Скрыть';
-
     const income = state.transactions.filter(t => t.direction === 'in').reduce((a, b) => a + b.amount, 0);
     const pct = income > 0 ? ((state.balance / income) * 100 - 100) : 0;
     const el = $('#balanceTrend');
@@ -380,18 +349,17 @@
     }
     container.innerHTML = items.map(t => {
       const isIn = t.direction === 'in';
-      const icon = isIn ? '↙' : '↗';
-      const d = new Date(t.date);
-      const dateStr = d.toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      const dateStr = new Date(t.date).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
       const catLabel = CATEGORY_LABELS[t.category]
         || (t.category === 'welcome' ? 'Бонус'
           : t.category === 'task' ? 'Задание'
           : t.category === 'deposit' ? 'Вклад'
           : t.category === 'crypto' ? 'Крипта'
+          : t.category === 'bonus' ? 'Бонус'
           : t.category);
       return `
         <div class="transaction">
-          <div class="transaction-icon ${isIn ? 'income' : ''}">${icon}</div>
+          <div class="transaction-icon ${isIn ? 'income' : ''}">${isIn ? '↙' : '↗'}</div>
           <div class="transaction-info">
             <strong>${esc(t.description)}</strong>
             <span>${esc(catLabel)}</span>
@@ -413,13 +381,36 @@
     $('#tasksCounter').textContent = `${done} / ${total}`;
   }
 
+  function renderBonus() {
+    const last = state.lastBonusAt || 0;
+    const elapsed = Date.now() - last;
+    const left = Math.max(0, HOURLY_INTERVAL - elapsed);
+    const m = Math.floor(left / 60000);
+    const s = Math.floor((left % 60000) / 1000);
+    const ready = left === 0;
+    $('#bonusCard').innerHTML = `
+      <div class="bonus-icon">🎁</div>
+      <div class="bonus-info">
+        <strong>${ready ? 'Бонус готов!' : 'Часовой бонус +' + moneyShort(HOURLY_BONUS)}</strong>
+        <small>${ready ? 'Нажмите, чтобы забрать' : 'Следующий бонус через ' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')}</small>
+      </div>
+      <button class="primary-btn" id="claimBonusBtn" ${ready ? '' : 'disabled'}>${ready ? 'Забрать' : 'Ждать'}</button>
+    `;
+    $('#claimBonusBtn')?.addEventListener('click', () => {
+      if (Date.now() - state.lastBonusAt < HOURLY_INTERVAL) return;
+      state.lastBonusAt = Date.now();
+      credit(HOURLY_BONUS, 'bonus', 'Часовой бонус');
+      showToast('+' + moneyShort(HOURLY_BONUS) + ' получено!', 'success');
+    });
+  }
+
   function renderCards() {
     const grid = $('#cardsGrid');
     if (!state.cards.length) {
-      grid.innerHTML = '<div class="manage-card"><h3>Нет карт</h3><p class="meta">Выпустите первую карту — это займёт 5 минут.</p></div>';
+      grid.innerHTML = '<div class="manage-card"><h3>Нет карт</h3><p class="meta">Нажмите «Выпустить карту» — момент, и готово.</p></div>';
     } else {
       grid.innerHTML = state.cards.map(c => {
-        const spentPct = Math.min(100, (c.spent / c.limit) * 100);
+        const pct = Math.min(100, (c.spent / c.limit) * 100);
         const over = c.spent > c.limit;
         return `
           <div class="manage-card">
@@ -430,7 +421,7 @@
                 <span>Израсходовано: ${moneyShort(c.spent)}</span>
                 <span>Лимит: ${moneyShort(c.limit)}</span>
               </div>
-              <div class="card-limit-bar ${over ? 'over' : ''}"><i style="width:${spentPct}%"></i></div>
+              <div class="card-limit-bar ${over ? 'over' : ''}"><i style="width:${pct}%"></i></div>
             </div>
             <div class="manage-actions">
               <button class="freeze-btn ${c.frozen ? 'active' : ''}" data-freeze="${c.id}">
@@ -441,7 +432,6 @@
           </div>`;
       }).join('');
     }
-
     grid.querySelectorAll('[data-freeze]').forEach(btn => {
       btn.addEventListener('click', () => {
         const card = state.cards.find(c => c.id === btn.dataset.freeze);
@@ -452,7 +442,6 @@
         showToast(`Карта •••• ${card.last4} ${card.frozen ? 'заморожена' : 'разморожена'}`);
       });
     });
-
     grid.querySelectorAll('[data-reset-limit]').forEach(btn => {
       btn.addEventListener('click', () => {
         const card = state.cards.find(c => c.id === btn.dataset.resetLimit);
@@ -463,25 +452,6 @@
         showToast('Лимит по карте сброшен');
       });
     });
-
-    renderPendingCards();
-  }
-
-  function renderPendingCards() {
-    const wrap = $('#pendingCards');
-    if (!state.pendingCards.length) { wrap.innerHTML = ''; return; }
-    wrap.innerHTML = state.pendingCards.map(p => {
-      const left = Math.max(0, p.readyAt - Date.now());
-      const m = Math.floor(left / 60000);
-      const s = Math.floor((left % 60000) / 1000);
-      return `<div class="pending-card">
-        <div>
-          <strong>Выпускается: ${esc(p.type)}</strong>
-          <small>Карта появится по готовности</small>
-        </div>
-        <span class="countdown">${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}</span>
-      </div>`;
-    }).join('');
   }
 
   function renderDeposits() {
@@ -503,7 +473,6 @@
           <button class="ghost-btn" data-close-deposit="${d.id}">Закрыть и получить</button>
         </div>`;
     }).join('');
-
     grid.querySelectorAll('[data-close-deposit]').forEach(btn => {
       btn.addEventListener('click', () => {
         const idx = state.deposits.findIndex(d => d.id === btn.dataset.closeDeposit);
@@ -529,8 +498,7 @@
     const grid = $('#cryptoGrid');
     let total = 0;
     Object.entries(state.crypto).forEach(([sym, h]) => {
-      const p = cryptoPrices[sym]?.price || 0;
-      total += h.amount * p;
+      total += h.amount * (cryptoPrices[sym]?.price || 0);
     });
     $('#cryptoPortfolio').textContent = 'Портфель: ' + moneyShort(total);
 
@@ -541,7 +509,7 @@
       const sign = change >= 0 ? '+' : '';
       const holding = state.crypto[sym];
       const holdText = holding
-        ? `У вас: ${holding.amount.toFixed(4)} ${sym} · ${moneyShort(holding.amount * p.price)}`
+        ? `У вас: ${holding.amount.toFixed(6)} ${sym} · ${moneyShort(holding.amount * p.price)}`
         : 'Нет в портфеле';
       return `
         <div class="crypto-card">
@@ -560,12 +528,8 @@
         </div>`;
     }).join('');
 
-    grid.querySelectorAll('[data-buy]').forEach(btn => {
-      btn.addEventListener('click', () => openCryptoModal(btn.dataset.buy, 'buy'));
-    });
-    grid.querySelectorAll('[data-sell]').forEach(btn => {
-      btn.addEventListener('click', () => openCryptoModal(btn.dataset.sell, 'sell'));
-    });
+    grid.querySelectorAll('[data-buy]').forEach(btn => btn.addEventListener('click', () => openCryptoModal(btn.dataset.buy, 'buy')));
+    grid.querySelectorAll('[data-sell]').forEach(btn => btn.addEventListener('click', () => openCryptoModal(btn.dataset.sell, 'sell')));
   }
 
   function renderTasks() {
@@ -590,10 +554,7 @@
       if (state.claimedTasks.includes(t.id)) return;
       if (!t.check(state)) return;
       state.claimedTasks.push(t.id);
-      addTransaction({
-        direction: 'in', amount: TASK_REWARD, category: 'task',
-        description: 'Бонус за задание: ' + t.title
-      });
+      addTransaction({ direction: 'in', amount: TASK_REWARD, category: 'task', description: 'Бонус за задание: ' + t.title });
       state.balance = deriveBalance(state.transactions);
       save();
       if (state.settings.notifications) {
@@ -608,68 +569,51 @@
     const monthly = state.transactions.filter(t =>
       t.date >= monthStart && t.direction === 'out' && CATEGORY_LABELS[t.category]
     );
-
     const byCat = {};
-    monthly.forEach(t => {
-      byCat[t.category] = (byCat[t.category] || 0) + t.amount;
-    });
-
+    monthly.forEach(t => { byCat[t.category] = (byCat[t.category] || 0) + t.amount; });
     const total = Object.values(byCat).reduce((a, b) => a + b, 0);
     const monthName = now.toLocaleString('ru-RU', { month: 'long', year: 'numeric' });
     $('#analyticsMonth').textContent = monthName.charAt(0).toUpperCase() + monthName.slice(1);
     $('#analyticsTotal').textContent = 'Расходы: ' + money(total);
     $('#analyticsCount').textContent = monthly.length + ' операций';
-
     const empty = $('#analyticsEmpty');
     const bars = $('#analyticsBars');
-
-    if (!total) {
-      bars.innerHTML = '';
-      empty.hidden = false;
-      return;
-    }
+    if (!total) { bars.innerHTML = ''; empty.hidden = false; return; }
     empty.hidden = true;
-
     const max = Math.max(...Object.values(byCat));
-    bars.innerHTML = Object.entries(byCat)
-      .sort((a, b) => b[1] - a[1])
-      .map(([cat, sum]) => {
-        const pct = (sum / max) * 100;
-        return `<div class="bar-row">
-          <span>${esc(CATEGORY_LABELS[cat])}</span>
-          <div><i style="width:${pct}%"></i></div>
-          <strong>${moneyShort(sum)}</strong>
-        </div>`;
-      }).join('');
+    bars.innerHTML = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([cat, sum]) => {
+      const pct = (sum / max) * 100;
+      return `<div class="bar-row">
+        <span>${esc(CATEGORY_LABELS[cat])}</span>
+        <div><i style="width:${pct}%"></i></div>
+        <strong>${moneyShort(sum)}</strong>
+      </div>`;
+    }).join('');
   }
 
-  /* ---------- MODAL ---------- */
+  // ---------- MODAL ----------
   function openModal({ eyebrow = '', title, bodyHTML, submitLabel = 'Подтвердить', onSubmit }) {
     const modal = $('#modal');
     $('#modalEyebrow').textContent = eyebrow;
     $('#modalTitle').textContent = title;
     $('#modalBody').innerHTML = `
-      <form id="modalForm">
+      <form id="modalForm" novalidate>
         ${bodyHTML}
         <p class="modal-error" id="modalError"></p>
         <button type="submit" class="primary-btn full">${esc(submitLabel)}</button>
       </form>`;
-
     modal.classList.add('open');
     setTimeout(() => $('#modalBody').querySelector('input, select')?.focus(), 60);
-
     $('#modalForm').addEventListener('submit', e => {
       e.preventDefault();
-      const errEl = $('#modalError');
-      errEl.textContent = '';
+      $('#modalError').textContent = '';
       try {
-        const result = onSubmit(new FormData(e.target));
-        if (result === false) return;
-        closeModal();
+        onSubmit(new FormData(e.target));
       } catch (err) {
-        errEl.textContent = err.message || 'Ошибка';
+        $('#modalError').textContent = err.message || 'Ошибка';
       }
     });
+    return modal;
   }
 
   function closeModal() { $('#modal').classList.remove('open'); }
@@ -678,67 +622,54 @@
   $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
-  /* ---------- ПЛАТЕЖИ ---------- */
+  // ---------- ПЛАТЕЖИ ----------
   $$('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.action;
-      if (action === 'transfer') openTransferModal();
-      if (action === 'utilities') openBillModal('utilities', 'ЖКХ');
-      if (action === 'mobile') openBillModal('mobile', 'Мобильная связь');
-      if (action === 'taxes') openBillModal('taxes', 'Налоги');
-      if (action === 'internet') openBillModal('internet', 'Интернет');
+      if (action === 'transfer') openTransfer();
+      if (action === 'utilities') openBill('utilities', 'ЖКХ');
+      if (action === 'mobile') openBill('mobile', 'Мобильная связь');
+      if (action === 'taxes') openBill('taxes', 'Налоги');
+      if (action === 'internet') openBill('internet', 'Интернет');
     });
   });
 
-  function openTransferModal() {
+  function openTransfer() {
     openModal({
-      eyebrow: 'ПЕРЕВОД',
-      title: 'Перевести средства',
-      submitLabel: 'Отправить',
+      eyebrow: 'ПЕРЕВОД', title: 'Перевести средства', submitLabel: 'Отправить',
       bodyHTML: `
         <label>Получатель
           <input name="recipient" placeholder="Имя или телефон" autocomplete="off">
         </label>
         <label>Сумма, ₽
           <input name="amount" placeholder="1 000" inputmode="decimal" autocomplete="off">
-        </label>
-      `,
+        </label>`,
       onSubmit: form => {
         const recipient = String(form.get('recipient') || '').trim();
         const amount = parseMoney(form.get('amount'));
         if (recipient.length < 2) throw new Error('Укажите получателя');
         if (!Number.isFinite(amount) || amount <= 0) throw new Error('Некорректная сумма');
         debit(amount, 'transfer', 'Перевод: ' + recipient);
+        closeModal();
         showToast(`Перевод на ${money(amount)} выполнен`, 'success');
       }
     });
   }
 
-  function openBillModal(category, title) {
+  function openBill(category, title) {
     const services = {
       utilities: ['Электроэнергия', 'Водоснабжение', 'Отопление', 'Вывоз мусора'],
       mobile: ['МТС', 'Билайн', 'МегаФон', 'Tele2'],
       taxes: ['НДФЛ', 'Транспортный налог', 'Земельный налог', 'Штраф ГИБДД'],
       internet: ['Ростелеком', 'Дом.ру', 'МТС Home', 'Билайн Home']
     };
-    const options = services[category].map((s, i) =>
-      `<option value="${i}">${esc(s)}</option>`).join('');
-
+    const options = services[category].map((s, i) => `<option value="${i}">${esc(s)}</option>`).join('');
     openModal({
-      eyebrow: 'ОПЛАТА',
-      title,
-      submitLabel: 'Оплатить',
+      eyebrow: 'ОПЛАТА', title, submitLabel: 'Оплатить',
       bodyHTML: `
-        <label>Услуга
-          <select name="service">${options}</select>
-        </label>
-        <label>Номер / счёт
-          <input name="account" placeholder="Лицевой счёт" autocomplete="off">
-        </label>
-        <label>Сумма, ₽
-          <input name="amount" placeholder="1 000" inputmode="decimal" autocomplete="off">
-        </label>
-      `,
+        <label>Услуга<select name="service">${options}</select></label>
+        <label>Номер / счёт<input name="account" placeholder="Лицевой счёт" autocomplete="off"></label>
+        <label>Сумма, ₽<input name="amount" placeholder="1 000" inputmode="decimal" autocomplete="off"></label>`,
       onSubmit: form => {
         const service = services[category][+form.get('service')];
         const account = String(form.get('account') || '').trim();
@@ -746,21 +677,20 @@
         if (account.length < 4) throw new Error('Введите номер/счёт');
         if (!Number.isFinite(amount) || amount <= 0) throw new Error('Некорректная сумма');
         debit(amount, category, `${service} · ${account.slice(-4).padStart(4, '•')}`);
+        closeModal();
         showToast(`Оплачено: ${service}`, 'success');
       }
     });
   }
 
-  /* ---------- КАРТЫ ---------- */
+  // ---------- КАРТЫ (мгновенно, макс. 2) ----------
   $('#issueCardBtn').addEventListener('click', () => {
-    if (state.pendingCards.length >= 2) {
-      showToast('Максимум 2 карты в выпуске одновременно', 'error');
+    if (state.cards.length >= MAX_CARDS) {
+      showToast(`Максимум ${MAX_CARDS} карты`, 'error');
       return;
     }
     openModal({
-      eyebrow: 'ВЫПУСК КАРТЫ',
-      title: 'Новая карта',
-      submitLabel: 'Выпустить (5 мин)',
+      eyebrow: 'ВЫПУСК КАРТЫ', title: 'Новая карта', submitLabel: 'Выпустить сразу',
       bodyHTML: `
         <label>Тип карты
           <select name="type">
@@ -769,27 +699,32 @@
             <option>Металлическая</option>
           </select>
         </label>
-        <p class="modal-note">Карта будет выпущена через 5 минут и появится в разделе «Мои карты».</p>
-      `,
+        <p class="modal-note">Карта будет активирована немедленно. Максимум ${MAX_CARDS} карты на аккаунт.</p>`,
       onSubmit: form => {
-        state.pendingCards.push({
+        if (state.cards.length >= MAX_CARDS) throw new Error(`Максимум ${MAX_CARDS} карты`);
+        const last4 = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+        state.cards.push({
           id: uid(),
           type: String(form.get('type')),
-          readyAt: Date.now() + CARD_ISSUE_MS
+          last4,
+          limit: MONTHLY_LIMIT,
+          spent: 0,
+          frozen: false,
+          issuedAt: Date.now()
         });
         save();
-        renderCards();
-        showToast('Карта в выпуске. Ожидайте 5 минут.', 'success');
+        checkTasks();
+        renderAll();
+        closeModal();
+        showToast('Карта выпущена!', 'success');
       }
     });
   });
 
-  /* ---------- ВКЛАДЫ ---------- */
+  // ---------- ВКЛАДЫ ----------
   $('#openDepositBtn').addEventListener('click', () => {
     openModal({
-      eyebrow: 'ВКЛАД',
-      title: 'Открыть вклад',
-      submitLabel: 'Открыть',
+      eyebrow: 'ВКЛАД', title: 'Открыть вклад', submitLabel: 'Открыть',
       bodyHTML: `
         <label>Сумма, ₽
           <input name="amount" placeholder="10 000" inputmode="decimal">
@@ -801,8 +736,7 @@
             <option value="12">12 месяцев — 16%</option>
           </select>
         </label>
-        <p class="modal-note">Доход рассчитывается пропорционально времени. Закрыть можно в любой момент.</p>
-      `,
+        <p class="modal-note">Доход рассчитывается пропорционально времени. Закрыть можно в любой момент.</p>`,
       onSubmit: form => {
         const amount = parseMoney(form.get('amount'));
         const term = +form.get('term');
@@ -819,92 +753,133 @@
         save();
         checkTasks();
         renderAll();
-        renderDeposits();
+        closeModal();
         showToast('Вклад открыт', 'success');
       }
     });
   });
 
-  /* ---------- КРИПТА ---------- */
+  // ---------- КРИПТА ----------
   function openCryptoModal(symbol, mode) {
     const meta = CRYPTO_META[symbol];
     const price = cryptoPrices[symbol].price;
     const holding = state.crypto[symbol];
 
     if (mode === 'buy') {
+      const quickBtns = [1000, 5000, 10000].map(v => `<button type="button" class="chip" data-buy-rub="${v}">${v.toLocaleString('ru-RU')} ₽</button>`).join('');
       openModal({
-        eyebrow: 'ПОКУПКА',
-        title: `Купить ${symbol}`,
-        submitLabel: 'Купить',
+        eyebrow: 'ПОКУПКА', title: `Купить ${symbol}`, submitLabel: 'Купить',
         bodyHTML: `
           <p class="modal-note">${meta.name}: ${money(price)} / 1 ${symbol}</p>
           <label>Сумма в ₽
-            <input name="rub" placeholder="10 000" inputmode="decimal">
+            <input name="rub" placeholder="10 000" inputmode="decimal" autocomplete="off">
           </label>
-          <label>Или количество ${symbol}
-            <input name="amount" placeholder="0.001" inputmode="decimal">
-          </label>
-        `,
+          <div class="quick-chips">
+            ${quickBtns}
+            <button type="button" class="chip chip--primary" data-buy-rub="all">Все средства</button>
+          </div>
+          <p class="modal-note" id="cryptoPreview"></p>`,
         onSubmit: form => {
           const rub = parseMoney(form.get('rub'));
-          const amt = parseMoney(form.get('amount'));
-          let qty;
-          if (rub > 0) {
-            if (rub > deriveBalance(state.transactions)) throw new Error('Недостаточно средств');
-            qty = rub / price;
-          } else if (amt > 0) {
-            qty = amt;
-            const cost = qty * price;
-            if (cost > deriveBalance(state.transactions)) throw new Error('Недостаточно средств');
-          } else {
-            throw new Error('Укажите сумму или количество');
-          }
-          const cost = qty * price;
+          if (!Number.isFinite(rub) || rub <= 0) throw new Error('Укажите сумму');
+          const realBalance = deriveBalance(state.transactions);
+          if (rub > realBalance) throw new Error('Недостаточно средств');
+          const qty = rub / price;
+          const cost = Math.round(qty * price * 100) / 100;
           addTransaction({ direction: 'out', amount: cost, category: 'crypto', description: `Покупка ${symbol}` });
           state.balance = deriveBalance(state.transactions);
-
           const h = state.crypto[symbol] || { amount: 0, avgPrice: 0 };
           const newAmount = h.amount + qty;
           h.avgPrice = newAmount > 0 ? (h.amount * h.avgPrice + qty * price) / newAmount : price;
           h.amount = newAmount;
           state.crypto[symbol] = h;
-
           save();
           checkTasks();
           renderAll();
+          closeModal();
           showToast(`Куплено ${qty.toFixed(6)} ${symbol}`, 'success');
         }
       });
+
+      setTimeout(() => {
+        const body = $('#modalBody');
+        const input = body.querySelector('[name="rub"]');
+        const preview = body.querySelector('#cryptoPreview');
+        function updatePreview() {
+          const rub = parseMoney(input.value);
+          if (rub > 0 && isFinite(rub)) {
+            preview.textContent = `Получите ≈ ${(rub / price).toFixed(6)} ${symbol}`;
+          } else {
+            preview.textContent = '';
+          }
+        }
+        input.addEventListener('input', updatePreview);
+        body.querySelectorAll('[data-buy-rub]').forEach(b => b.addEventListener('click', () => {
+          const v = b.dataset.buyRub;
+          if (v === 'all') {
+            input.value = Math.floor(deriveBalance(state.transactions));
+          } else {
+            input.value = v;
+          }
+          updatePreview();
+        }));
+      }, 60);
     } else {
       if (!holding || holding.amount <= 0) return;
       openModal({
-        eyebrow: 'ПРОДАЖА',
-        title: `Продать ${symbol}`,
-        submitLabel: 'Продать',
+        eyebrow: 'ПРОДАЖА', title: `Продать ${symbol}`, submitLabel: 'Продать',
         bodyHTML: `
           <p class="modal-note">У вас ${holding.amount.toFixed(6)} ${symbol} · ${money(holding.amount * price)}</p>
+          <div class="quick-chips">
+            <button type="button" class="chip" data-sell-pct="25">25%</button>
+            <button type="button" class="chip" data-sell-pct="50">50%</button>
+            <button type="button" class="chip" data-sell-pct="75">75%</button>
+            <button type="button" class="chip chip--primary" data-sell-pct="100">Всё</button>
+          </div>
           <label>Количество ${symbol}
-            <input name="amount" placeholder="0.001" inputmode="decimal">
+            <input name="amount" placeholder="0.001" inputmode="decimal" autocomplete="off">
           </label>
-        `,
+          <p class="modal-note" id="cryptoPreview"></p>`,
         onSubmit: form => {
           const qty = parseMoney(form.get('amount'));
           if (!Number.isFinite(qty) || qty <= 0) throw new Error('Некорректное количество');
-          if (qty > holding.amount) throw new Error('Недостаточно средств');
+          if (qty > holding.amount + 1e-9) throw new Error('Недостаточно средств');
           const proceeds = qty * price;
           holding.amount -= qty;
           if (holding.amount < 1e-9) delete state.crypto[symbol];
-          addTransaction({ direction: 'in', amount: proceeds, category: 'crypto', description: `Продажа ${symbol}` });
+          addTransaction({ direction: 'in', amount: Math.round(proceeds * 100) / 100, category: 'crypto', description: `Продажа ${symbol}` });
           state.balance = deriveBalance(state.transactions);
           save();
           renderAll();
+          closeModal();
           showToast(`Продано ${qty.toFixed(6)} ${symbol} за ${money(proceeds)}`, 'success');
         }
       });
+
+      setTimeout(() => {
+        const body = $('#modalBody');
+        const input = body.querySelector('[name="amount"]');
+        const preview = body.querySelector('#cryptoPreview');
+        function updatePreview() {
+          const q = parseMoney(input.value);
+          if (q > 0 && isFinite(q)) {
+            preview.textContent = `Получите ≈ ${money(q * price)}`;
+          } else {
+            preview.textContent = '';
+          }
+        }
+        input.addEventListener('input', updatePreview);
+        body.querySelectorAll('[data-sell-pct]').forEach(b => b.addEventListener('click', () => {
+          const p = Number(b.dataset.sellPct);
+          const amt = holding.amount * p / 100;
+          input.value = p === 100 ? amt.toFixed(8) : amt.toFixed(8);
+          updatePreview();
+        }));
+      }, 60);
     }
   }
 
-  /* ---------- НАСТРОЙКИ ---------- */
+  // ---------- НАСТРОЙКИ ----------
   $('#toggleBalance').addEventListener('click', () => {
     state.settings.hideBalance = !state.settings.hideBalance;
     save();
@@ -925,7 +900,7 @@
     save();
   });
 
-  /* ---------- TOAST ---------- */
+  // ---------- TOAST ----------
   let toastTimer;
   function showToast(msg, type = '') {
     const toast = $('#toast');
@@ -936,13 +911,11 @@
     toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
   }
 
-  /* ---------- ТИКЕРЫ ---------- */
-  let tickersStarted = false;
+  // ---------- ТИКЕРЫ ----------
+  let started = false;
   function startTickers() {
-    if (tickersStarted) return;
-    tickersStarted = true;
-
-    // Крипта
+    if (started) return;
+    started = true;
     setInterval(() => {
       Object.values(cryptoPrices).forEach(p => {
         const change = (Math.random() - 0.5) * 0.02;
@@ -950,30 +923,9 @@
       });
       if (currentPage === 'crypto') renderCrypto();
     }, 3000);
-
-    // Выпуск карт (5 мин)
     setInterval(() => {
-      const now = Date.now();
-      const ready = state.pendingCards.filter(c => c.readyAt <= now);
-      if (ready.length) {
-        ready.forEach(p => {
-          state.cards.push({
-            id: p.id, type: p.type,
-            last4: String(Math.floor(Math.random() * 10000)).padStart(4, '0'),
-            limit: MONTHLY_LIMIT, spent: 0, frozen: false, issuedAt: now
-          });
-        });
-        state.pendingCards = state.pendingCards.filter(c => c.readyAt > now);
-        save();
-        renderCards();
-        checkTasks();
-        ready.forEach(() => showToast('🎉 Карта выпущена!', 'success'));
-      } else if (state.pendingCards.length) {
-        renderPendingCards();
-      }
+      if (currentPage === 'dashboard') renderBonus();
     }, 1000);
-
-    // САМОПРОВЕРКА БАЛАНСА: если что-то разошлось с транзакциями — восстанавливаем
     setInterval(() => {
       const derived = deriveBalance(state.transactions);
       if (Math.abs(derived - state.balance) > 0.01) {
@@ -984,27 +936,13 @@
     }, 3000);
   }
 
-  /* ---------- SPLASH ---------- */
-  function hideSplash() {
-    const splash = document.getElementById('splash');
-    if (splash) splash.classList.add('hide');
-  }
-  setTimeout(hideSplash, 3000);
+  // ---------- SPLASH ----------
+  setTimeout(() => document.getElementById('splash')?.classList.add('hide'), 3000);
 
-  /* ---------- BOOT ---------- */
-  console.log(
-    '%c⚠ STOP',
-    'color:#ff7a8a; font-size:42px; font-weight:900; text-shadow:0 0 20px rgba(255,122,138,0.5);'
-  );
-  console.log(
-    '%cЭто демо-приложение Z-Bank. Все данные хранятся локально и подписаны. Изменение баланса через консоль невозможно — баланс пересчитывается из подписанных транзакций.',
-    'color:#a9c5e6; font-size:13px; line-height:1.5;'
-  );
+  // ---------- BOOT ----------
+  console.log('%c⚠ STOP', 'color:#ff7a8a; font-size:42px; font-weight:900;');
+  console.log('%cЭто клиентское демо Z-Bank. Все данные подписаны, баланс считается из транзакций. Изменение через консоль не сработает.', 'color:#a9c5e6; font-size:13px;');
 
-  if (state.user) {
-    showApp();
-  } else {
-    showAuth();
-  }
-
+  if (state.user) showApp();
+  else showAuth();
 })();
