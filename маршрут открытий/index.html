@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Маршрут открытий — прогулочные маршруты</title>
+<script src="theme-init.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="logo">
+      <span class="mark">🧭</span>
+      <span class="txt">Маршрут открытий</span>
+    </div>
+    <nav class="nav">
+      <button data-act="nav" data-view="home">Главная</button>
+      <button data-act="nav" data-view="catalog">Каталог</button>
+      <button data-act="nav" data-view="favorites">Избранное<span class="badge zero" id="favbadge">0</span></button>
+    </nav>
+    <button class="theme-btn" id="themeBtn" type="button" aria-label="Сменить тему" title="Сменить тему">
+      <svg class="ticon sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="4.2"/>
+        <path d="M12 2.4v2.1M12 19.5v2.1M2.4 12h2.1M19.5 12h2.1M5.1 5.1l1.5 1.5M17.4 17.4l1.5 1.5M18.9 5.1l-1.5 1.5M6.6 17.4l-1.5 1.5"/>
+      </svg>
+      <svg class="ticon moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M20.2 14.6A8.6 8.6 0 0 1 9.4 3.8a8.6 8.6 0 1 0 10.8 10.8z"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<footer class="wrap">
+  <div class="foot">
+    <span>© 2026 «Маршрут открытий» — учебный проект. Прогулки пешком, без брони и регистрации.</span>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
